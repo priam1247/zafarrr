@@ -3,7 +3,7 @@ import time
 import requests
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from moviepy.editor import ImageClip, concatenate_videoclips, AudioFileClip
+from moviepy import ImageClip, concatenate_videoclips
 from dotenv import load_dotenv
 
 load_dotenv()
