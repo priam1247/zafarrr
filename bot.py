@@ -4,6 +4,7 @@ import time
 import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from reel_generator import create_and_post_reel
 
 load_dotenv()
 
@@ -275,6 +276,9 @@ def handle_fulltime(match, league_name):
         f"Follow Goal Score ZFR for updates"
     )
     post_to_facebook(msg)
+
+    # Generate and post reel after full time
+    create_and_post_reel(match, league_name)
 
 # ── Main loop ────────────────────────────────────────────────────
 matchday_posted_today = None
