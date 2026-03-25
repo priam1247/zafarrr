@@ -1,0 +1,59 @@
+[33mcommit fb5db785ba9082b63a9e7c129df5617068348251[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Wed Mar 25 11:58:30 2026 +0200
+
+    Fix gitignore remove cached files
+
+[33mcommit 6521034f69cf6124da547b77fe1906b6eaf98e1e[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Wed Mar 25 11:49:25 2026 +0200
+
+    Fix gitignore remove cached files
+
+[33mcommit df01384416704248f49a5eadb07d74487749fd58[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Wed Mar 25 11:46:23 2026 +0200
+
+    Replace Claude API with free template rewriter
+
+[33mcommit 1ddbddcfa830761c26a1cd3cb2c26d8edd235b2c[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Wed Mar 25 11:06:12 2026 +0200
+
+    Upgrade news bot with AI rewriter and smart features
+
+[33mcommit abc0c4c28bd2b56bf343b3888b56f95c7ada580d[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Wed Mar 25 00:05:17 2026 +0200
+
+    Fix gitignore remove cached files
+
+[33mcommit 26692bda15f64225106111f4c8ef9dda6eec3cf4[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Wed Mar 25 00:02:04 2026 +0200
+
+    Add keep-alive web server
+
+[33mcommit b57e477824244fe2abc489a69ffa1786fbd7f65a[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Tue Mar 24 22:58:27 2026 +0200
+
+    Fix moviepy import
+
+[33mcommit a2b255079bba47121cb8305d73afbbed16fdcef7[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Tue Mar 24 22:50:35 2026 +0200
+
+    Add reel generator
+
+[33mcommit 5b15ae76b8ef0f0389414ab84f6ca59d2e8b827d[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Tue Mar 24 22:26:42 2026 +0200
+
+    Fix gitignore remove cached files
+
+[33mcommit af0f8931fc443ccd23d0184fed692821340e1160[m
+Author: Troy Zafar Priam <troykunsauka6@gmail.com>
+Date:   Tue Mar 24 22:06:06 2026 +0200
+
+    Initial commit - Goal Score ZFR bot
