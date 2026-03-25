@@ -12,7 +12,6 @@ load_dotenv()
 FB_TOKEN      = os.getenv("FB_TOKEN")
 FB_PAGE_ID    = os.getenv("FB_PAGE_ID")
 FOOTBALL_KEY  = os.getenv("FOOTBALL_KEY")
-CLAUDE_KEY    = os.getenv("CLAUDE_KEY")
 
 FB_POST_URL    = f"https://graph.facebook.com/{FB_PAGE_ID}/feed"
 FOOTBALL_BASE  = "https://api.football-data.org/v4"
@@ -81,7 +80,7 @@ CATEGORIES = {
     },
 }
 
-# Quality keywords — only post real news not opinions/filler
+# Quality keywords — only post real news not opinions
 QUALITY_KEYWORDS = [
     "transfer", "sign", "injury", "contract", "sack", "appoint", "ban",
     "suspend", "confirm", "official", "breaking", "deal", "free agent",
@@ -94,27 +93,114 @@ QUALITY_KEYWORDS = [
     "psg", "atletico", "tottenham", "newcastle", "city", "united"
 ]
 
-# Filler to skip — low quality content
+# Filler to skip
 FILLER_KEYWORDS = [
     "5 things", "player ratings", "fan reaction", "remember when",
     "best goals", "worst goals", "quiz", "ranked", "every goal",
-    "watch:", "video:", "gallery:", "photos:", "in pictures"
+    "watch:", "video:", "gallery:", "photos:", "in pictures",
+    "predicted", "how to watch", "tv channel", "live stream",
+    "preview:", "vs:", "betting odds"
 ]
 
-# Football entity names for deduplication
+# Entity names for deduplication
 PLAYER_NAMES = [
     "salah", "haaland", "mbappe", "vinicius", "bellingham", "saka",
     "odegaard", "de bruyne", "kane", "lewandowski", "messi", "ronaldo",
     "neymar", "rashford", "fernandes", "rice", "rodri", "pedri",
-    "yamal", "gavi", "ter stegen", "alisson", "ederson", "courtois"
+    "yamal", "gavi", "ter stegen", "alisson", "ederson", "courtois",
+    "modric", "kroos", "benzema", "griezmann", "dembele", "camavinga"
 ]
 
 CLUB_NAMES = [
     "liverpool", "manchester city", "manchester united", "arsenal", "chelsea",
     "tottenham", "newcastle", "barcelona", "real madrid", "atletico",
     "juventus", "milan", "inter", "napoli", "bayern", "dortmund",
-    "psg", "ajax", "porto", "benfica", "celtic", "rangers"
+    "psg", "ajax", "porto", "benfica", "celtic", "rangers", "lazio", "roma"
 ]
+
+# ── Free template rewriter ────────────────────────────────────────
+# Journalist phrases to clean up
+CLEAN_PHRASES = [
+    (r"'[^']*'\s*[-–—:]\s*", ""),           # Remove 'quote' - at start
+    (r'"[^"]*"\s*[-–—:]\s*', ""),           # Remove "quote" - at start
+    (r"\baccording to reports\b", ""),
+    (r"\bit has been claimed that\b", ""),
+    (r"\bit is understood that\b", ""),
+    (r"\bit is believed that\b", ""),
+    (r"\bsources have told\b.*", ""),
+    (r"\bexclusive:\s*", ""),
+    (r"\bbreaking:\s*", ""),
+    (r"\breport:\s*", ""),
+    (r"\breports:\s*", ""),
+    (r"\bwatch:\s*", ""),
+    (r"\banalysis:\s*", ""),
+    (r"\[\d+\]", ""),                        # Remove footnote numbers
+    (r"\s{2,}", " "),                        # Clean double spaces
+]
+
+# Simple word replacements for plain English
+WORD_REPLACEMENTS = [
+    ("depart", "leave"),
+    ("terminate", "end"),
+    ("contractual agreement", "contract"),
+    ("upon expiration of", "when his contract ends at"),
+    ("set to", "will"),
+    ("ahead of", "better than"),
+    ("amid", "during"),
+    ("following", "after"),
+    ("securing", "getting"),
+    ("obtaining", "getting"),
+    ("potential", "possible"),
+    ("currently", "now"),
+    ("subsequently", "then"),
+    ("previously", "before"),
+    ("approximately", "about"),
+    ("remainder of", "rest of"),
+    ("football club", ""),
+    ("fc ", ""),
+]
+
+def simplify_title(title):
+    """Clean journalist language and simplify to plain English."""
+    text = title.strip()
+
+    # Apply regex cleanups
+    for pattern, replacement in CLEAN_PHRASES:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+
+    # Apply word replacements
+    for old, new in WORD_REPLACEMENTS:
+        text = re.sub(r'\b' + re.escape(old) + r'\b', new, text,
+                      flags=re.IGNORECASE)
+
+    # Capitalize first letter
+    text = text.strip().capitalize()
+    return text
+
+def build_simple_sentence(title, desc, category):
+    """Build a simple 1-3 sentence explanation from title and description."""
+    clean = simplify_title(title)
+    text = clean
+
+    # Add context from description if available
+    if desc:
+        desc_clean = re.sub(r'<[^>]+>', '', desc).strip()
+        desc_clean = re.sub(r'\s+', ' ', desc_clean)
+        # Only use first sentence of description
+        first_sentence = desc_clean.split('.')[0].strip()
+        if first_sentence and len(first_sentence) > 20 and first_sentence.lower() not in clean.lower():
+            # Simplify the description sentence too
+            for old, new in WORD_REPLACEMENTS:
+                first_sentence = re.sub(r'\b' + re.escape(old) + r'\b',
+                                        new, first_sentence, flags=re.IGNORECASE)
+            if len(text) + len(first_sentence) < 280:
+                text = f"{clean}. {first_sentence.capitalize()}"
+
+    # Ensure ends with period
+    if text and not text.endswith('.'):
+        text += '.'
+
+    return text
 
 # ── Persistent state ──────────────────────────────────────────────
 def load_news_state():
@@ -172,21 +258,14 @@ def is_quality_story(title, desc=""):
 
 def extract_entities(title):
     text = title.lower()
-    found = []
-    for name in PLAYER_NAMES + CLUB_NAMES:
-        if name in text:
-            found.append(name)
-    return found
+    return [name for name in PLAYER_NAMES + CLUB_NAMES if name in text]
 
 def is_duplicate_entity(title):
-    """Block same player/club combo posted in last 4 hours."""
     entities = extract_entities(title)
     now = time.time()
     for entry in recent_entities:
-        entry_time  = entry.get("time", 0)
-        entry_names = entry.get("entities", [])
-        if now - entry_time < 14400:  # 4 hours
-            overlap = set(entities) & set(entry_names)
+        if now - entry.get("time", 0) < 14400:
+            overlap = set(entities) & set(entry.get("entities", []))
             if len(overlap) >= 1 and len(entities) > 0:
                 return True
     return False
@@ -206,10 +285,8 @@ def is_matchday():
                 f"?dateFrom={today}&dateTo={today}",
                 headers=headers, timeout=8
             )
-            if r.status_code == 200:
-                data = r.json()
-                if data.get("matches"):
-                    return True
+            if r.status_code == 200 and r.json().get("matches"):
+                return True
         except Exception:
             pass
     return False
@@ -224,57 +301,18 @@ def fetch_rss(url):
         print(f"[ERROR] RSS fetch failed: {e}")
     return None
 
-# ── Claude AI rewriter ────────────────────────────────────────────
-def rewrite_with_claude(title, description, category):
-    if not CLAUDE_KEY:
-        return None
-    try:
-        prompt = (
-            f"You are a football news writer for a Facebook page called Goal Score ZFR.\n"
-            f"Rewrite this football news in very simple English that anyone in the world can understand.\n"
-            f"Maximum 3 short sentences. No complex words. Be direct and clear.\n"
-            f"Do not include any hashtags, links or emojis.\n"
-            f"Do not start with the category name.\n\n"
-            f"News headline: {title}\n"
-            f"Details: {description[:300] if description else 'No details'}\n\n"
-            f"Rewritten (3 sentences max):"
-        )
-        response = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": CLAUDE_KEY,
-                "anthropic-version": "2023-06-01"
-            },
-            json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 150,
-                "messages": [{"role": "user", "content": prompt}]
-            },
-            timeout=15
-        )
-        if response.status_code == 200:
-            data = response.json()
-            return data["content"][0]["text"].strip()
-    except Exception as e:
-        print(f"[ERROR] Claude rewrite failed: {e}")
-    return None
-
 def post_to_facebook(message):
     payload = {"message": message, "access_token": FB_TOKEN}
     r = requests.post(FB_POST_URL, data=payload, timeout=10)
     if r.status_code == 200:
         print(f"[POSTED] {message[:80]}...")
         return True
-    else:
-        print(f"[ERROR] FB post failed: {r.status_code} {r.text}")
-        return False
+    print(f"[ERROR] FB post failed: {r.status_code} {r.text}")
+    return False
 
-def format_post(category, emoji, rewritten, original_title, source):
-    label = f"{emoji} {category} |"
-    text  = rewritten if rewritten else original_title
+def format_post(category, emoji, body, source):
     return (
-        f"{label} {text}\n\n"
+        f"{emoji} {category} | {body}\n\n"
         f"📡 Source: {source}\n\n"
         f"Follow Goal Score ZFR for updates"
     )
@@ -283,26 +321,25 @@ def format_post(category, emoji, rewritten, original_title, source):
 def check_news():
     global last_post_time, posts_today, last_reset_date, last_source
 
-    # Reset daily counter at midnight UTC
+    # Reset daily counter
     today_str = datetime.utcnow().strftime("%Y-%m-%d")
     if today_str != last_reset_date:
         posts_today = 0
         last_reset_date = today_str
-        print(f"[NEWS] Daily counter reset. New day: {today_str}")
+        print(f"[NEWS] Daily counter reset.")
 
     # Max 30 posts per day
     if posts_today >= 30:
-        print(f"[NEWS] Daily limit reached ({posts_today}/30). Waiting for tomorrow.")
+        print(f"[NEWS] Daily limit reached (30/30).")
         return
 
-    # Determine posting gap based on matchday
-    matchday = is_matchday()
-    gap = 7200 if matchday else 2700  # 2 hours on matchday, 45 mins otherwise
-    gap_label = "2 hours (matchday)" if matchday else "45 mins (no games)"
-
-    now_ts = time.time()
-    elapsed = now_ts - last_post_time
-    remaining = int((gap - elapsed) / 60)
+    # Auto detect matchday and set gap
+    matchday    = is_matchday()
+    gap         = 7200 if matchday else 2700
+    gap_label   = "2 hrs (matchday)" if matchday else "45 mins (no games)"
+    now_ts      = time.time()
+    elapsed     = now_ts - last_post_time
+    remaining   = int((gap - elapsed) / 60)
 
     if elapsed < gap:
         print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] "
@@ -311,7 +348,7 @@ def check_news():
 
     print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] Checking news feeds...")
 
-    # Source rotation — alternate between Goal.com and Sky Sports
+    # Source rotation
     feeds_ordered = RSS_FEEDS.copy()
     if last_source == RSS_FEEDS[0]["name"]:
         feeds_ordered = [RSS_FEEDS[1], RSS_FEEDS[0]]
@@ -325,7 +362,6 @@ def check_news():
                  tree.findall(".//{http://www.w3.org/2005/Atom}entry"))
 
         for item in items[:8]:
-            # Get title
             title_el = item.find("title")
             if title_el is None:
                 continue
@@ -333,13 +369,11 @@ def check_news():
             if not title:
                 continue
 
-            # Get description
             desc_el = item.find("description")
-            desc = (desc_el.text or "") if desc_el is not None else ""
-            # Strip HTML tags from description
-            desc = re.sub(r'<[^>]+>', '', desc).strip()
+            desc = re.sub(r'<[^>]+>', '',
+                          (desc_el.text or "") if desc_el is not None else "").strip()
 
-            # Quality check — skip filler
+            # Quality check
             if not is_quality_story(title, desc):
                 continue
 
@@ -348,24 +382,24 @@ def check_news():
             if key in posted_keys:
                 continue
 
-            # Entity duplicate check — same player/club within 4 hours
+            # Entity duplicate check
             if is_duplicate_entity(title):
-                print(f"[SKIP] Duplicate entity: {title[:50]}")
+                print(f"[SKIP] Same story: {title[:50]}")
                 posted_keys.add(key)
                 continue
 
             # Detect category
             category, emoji, is_priority = detect_category(title, desc)
 
-            # Breaking/Official news skips the time gap
+            # Breaking/Official skips the time gap
             if not is_priority and elapsed < gap:
                 continue
 
-            # Rewrite with Claude AI
-            rewritten = rewrite_with_claude(title, desc, category)
+            # Free template rewrite — simple English
+            body = build_simple_sentence(title, desc, category)
 
             # Format and post
-            msg = format_post(category, emoji, rewritten, title, feed["name"])
+            msg = format_post(category, emoji, body, feed["name"])
             success = post_to_facebook(msg)
 
             if success:
@@ -376,17 +410,17 @@ def check_news():
                 posts_today += 1
                 save_news_state(posted_keys, last_post_time, posts_today,
                                 last_reset_date, recent_entities, last_source)
-                print(f"[NEWS] Posted ({posts_today}/30 today). "
+                print(f"[NEWS] Posted ({posts_today}/30). "
                       f"Category: {category}. Source: {feed['name']}")
                 return
 
-    print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] No new quality stories found.")
+    print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] No new quality stories.")
 
 # ── Run ───────────────────────────────────────────────────────────
 def run():
     print("Goal Score ZFR News Bot started...")
-    print("Sources: Goal.com (alternating) Sky Sports")
-    print("AI rewriter: Claude API")
+    print("Sources: Goal.com / Sky Sports (alternating)")
+    print("Rewriter: Free template engine")
     print("Smart matchday detection: ON")
     print("Duplicate filter: ON\n")
 
