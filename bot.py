@@ -16,23 +16,38 @@ FOOTBALL_BASE = "https://api.football-data.org/v4"
 FB_POST_URL   = f"https://graph.facebook.com/{FB_PAGE_ID}/feed"
 STATE_FILE    = "match_state.json"
 
+# ── All available leagues ─────────────────────────────────────────
 LEAGUES = {
     "PL":  "Premier League",
     "PD":  "La Liga",
     "SA":  "Serie A",
-    "CL":  "Champions League",
     "BL1": "Bundesliga",
+    "FL1": "Ligue 1",
+    "CL":  "Champions League",
+    "ELC": "Championship",
+    "DED": "Eredivisie",
+    "PPL": "Primeira Liga",
+    "BSA": "Brasileirao",
+    "WC":  "FIFA World Cup",
+    "EC":  "European Championship",
 }
 
 LEAGUE_FLAGS = {
     "PL":  "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
     "PD":  "🇪🇸",
     "SA":  "🇮🇹",
-    "CL":  "🏆",
     "BL1": "🇩🇪",
+    "FL1": "🇫🇷",
+    "CL":  "🏆",
+    "ELC": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "DED": "🇳🇱",
+    "PPL": "🇵🇹",
+    "BSA": "🇧🇷",
+    "WC":  "🌍",
+    "EC":  "🇪🇺",
 }
 
-# ── Persistent state ─────────────────────────────────────────────
+# ── Persistent state ──────────────────────────────────────────────
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -63,7 +78,7 @@ def save_state(goals, cards, lineups, halftimes, fulltimes, matchdays):
 
 posted_goals, posted_cards, posted_lineups, posted_halftimes, posted_ft, posted_matchdays = load_state()
 
-# ── Helpers ──────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────
 def football_get(path):
     headers = {"X-Auth-Token": FOOTBALL_KEY}
     try:
@@ -91,27 +106,34 @@ def get_score(match):
     as_  = ft["away"] if ft["away"] is not None else (ht["away"] or 0)
     return home, away, hs, as_
 
-# ── Matchday preview ─────────────────────────────────────────────
+def has_matches_today():
+    """Check if any league has matches today."""
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    for code in LEAGUES:
+        data = football_get(
+            f"/competitions/{code}/matches?dateFrom={today}&dateTo={today}"
+        )
+        if data and data.get("matches"):
+            return True
+    return False
+
+# ── Matchday preview ──────────────────────────────────────────────
 def handle_matchday_preview(all_matches_today):
     today = datetime.utcnow().strftime("%Y-%m-%d")
-    key = f"matchday_{today}"
-    if key in posted_matchdays:
-        return
-
-    if not all_matches_today:
+    key   = f"matchday_{today}"
+    if key in posted_matchdays or not all_matches_today:
         return
 
     lines = ["🗓️ MATCH DAY!\n"]
     for league_code, matches in all_matches_today.items():
+        flag = LEAGUE_FLAGS.get(league_code, "🏆")
         league_name = LEAGUES[league_code]
-        flag = LEAGUE_FLAGS[league_code]
         lines.append(f"{flag} {league_name}")
         for m in matches:
             home = m["homeTeam"]["shortName"]
             away = m["awayTeam"]["shortName"]
-            kickoff_str = m.get("utcDate", "")
             try:
-                kickoff = datetime.strptime(kickoff_str, "%Y-%m-%dT%H:%M:%SZ")
+                kickoff = datetime.strptime(m.get("utcDate", ""), "%Y-%m-%dT%H:%M:%SZ")
                 time_str = kickoff.strftime("%H:%M UTC")
             except Exception:
                 time_str = "TBD"
@@ -120,18 +142,19 @@ def handle_matchday_preview(all_matches_today):
 
     lines.append("Follow Goal Score ZFR for live updates")
     posted_matchdays.add(key)
-    save_state(posted_goals, posted_cards, posted_lineups, posted_halftimes, posted_ft, posted_matchdays)
+    save_state(posted_goals, posted_cards, posted_lineups,
+               posted_halftimes, posted_ft, posted_matchdays)
     post_to_facebook("\n".join(lines))
 
-# ── Lineups ──────────────────────────────────────────────────────
+# ── Lineups ───────────────────────────────────────────────────────
 def handle_lineups(match, league_name):
     match_id = match["id"]
     key = f"{match_id}_lineup"
     if key in posted_lineups:
         return
 
-    home = match["homeTeam"]["shortName"]
-    away = match["awayTeam"]["shortName"]
+    home    = match["homeTeam"]["shortName"]
+    away    = match["awayTeam"]["shortName"]
     lineups = match.get("lineups", [])
     if len(lineups) < 2:
         return
@@ -144,31 +167,39 @@ def handle_lineups(match, league_name):
         )
 
     posted_lineups.add(key)
-    save_state(posted_goals, posted_cards, posted_lineups, posted_halftimes, posted_ft, posted_matchdays)
+    save_state(posted_goals, posted_cards, posted_lineups,
+               posted_halftimes, posted_ft, posted_matchdays)
+    flag = LEAGUE_FLAGS.get(
+        next((c for c, n in LEAGUES.items() if n == league_name), ""), "🏆"
+    )
     msg = (
         f"📋 Lineups: {home} vs {away}\n\n"
         f"🔵 {home}:\n{format_players(lineups[0])}\n\n"
         f"🔴 {away}:\n{format_players(lineups[1])}\n\n"
-        f"🏆 {league_name}\n\n"
+        f"{flag} {league_name}\n\n"
         f"Follow Goal Score ZFR for live updates"
     )
     post_to_facebook(msg)
 
-# ── Goals ────────────────────────────────────────────────────────
+# ── Goals ─────────────────────────────────────────────────────────
 def handle_goals(match, league_name):
     match_id = match["id"]
     home, away, hs, as_ = get_score(match)
+    flag = LEAGUE_FLAGS.get(
+        next((c for c, n in LEAGUES.items() if n == league_name), ""), "🏆"
+    )
 
     for goal in match.get("goals", []):
-        scorer  = goal.get("scorer", {}).get("name", "Unknown")
-        assist  = goal.get("assist", {})
-        minute  = goal.get("minute", "?")
-        team    = goal.get("team", {}).get("shortName", "")
-        key     = f"{match_id}_{team}_{minute}_{scorer}"
+        scorer = goal.get("scorer", {}).get("name", "Unknown")
+        assist = goal.get("assist", {})
+        minute = goal.get("minute", "?")
+        team   = goal.get("team", {}).get("shortName", "")
+        key    = f"{match_id}_{team}_{minute}_{scorer}"
 
         if key not in posted_goals:
             posted_goals.add(key)
-            save_state(posted_goals, posted_cards, posted_lineups, posted_halftimes, posted_ft, posted_matchdays)
+            save_state(posted_goals, posted_cards, posted_lineups,
+                       posted_halftimes, posted_ft, posted_matchdays)
 
             assist_line = ""
             if assist and assist.get("name"):
@@ -176,17 +207,20 @@ def handle_goals(match, league_name):
 
             msg = (
                 f"🚩 Live: {home} {hs}-{as_} {away}\n\n"
-                f"⚽ Goal: {scorer} ({minute}')\n"
+                f"⚽ Goal: {scorer} ({minute}')\n\n"
                 f"{assist_line}"
-                f"🏆 {league_name}\n\n"
+                f"{flag} {league_name}\n\n"
                 f"Follow Goal Score ZFR for updates"
             )
             post_to_facebook(msg)
 
-# ── Red cards ────────────────────────────────────────────────────
+# ── Red cards ─────────────────────────────────────────────────────
 def handle_red_cards(match, league_name):
     match_id = match["id"]
     home, away, hs, as_ = get_score(match)
+    flag = LEAGUE_FLAGS.get(
+        next((c for c, n in LEAGUES.items() if n == league_name), ""), "🏆"
+    )
 
     for booking in match.get("bookings", []):
         if booking.get("card") == "RED_CARD":
@@ -197,16 +231,17 @@ def handle_red_cards(match, league_name):
 
             if key not in posted_cards:
                 posted_cards.add(key)
-                save_state(posted_goals, posted_cards, posted_lineups, posted_halftimes, posted_ft, posted_matchdays)
+                save_state(posted_goals, posted_cards, posted_lineups,
+                           posted_halftimes, posted_ft, posted_matchdays)
                 msg = (
                     f"🚩 Live: {home} {hs}-{as_} {away}\n\n"
                     f"🟥 Red Card: {player} ({minute}') — {team}\n\n"
-                    f"🏆 {league_name}\n\n"
+                    f"{flag} {league_name}\n\n"
                     f"Follow Goal Score ZFR for updates"
                 )
                 post_to_facebook(msg)
 
-# ── Half time ────────────────────────────────────────────────────
+# ── Half time ─────────────────────────────────────────────────────
 def handle_halftime(match, league_name):
     match_id = match["id"]
     key = f"{match_id}_halftime"
@@ -217,10 +252,12 @@ def handle_halftime(match, league_name):
     away = match["awayTeam"]["shortName"]
     hs   = match["score"]["halfTime"]["home"] or 0
     as_  = match["score"]["halfTime"]["away"] or 0
+    flag = LEAGUE_FLAGS.get(
+        next((c for c, n in LEAGUES.items() if n == league_name), ""), "🏆"
+    )
 
-    goals = match.get("goals", [])
     goal_lines = []
-    for g in goals:
+    for g in match.get("goals", []):
         scorer = g.get("scorer", {}).get("name", "Unknown")
         minute = g.get("minute", "?")
         team   = g.get("team", {}).get("shortName", "")
@@ -229,16 +266,17 @@ def handle_halftime(match, league_name):
     goals_summary = "\n".join(goal_lines) if goal_lines else "  No goals yet"
 
     posted_halftimes.add(key)
-    save_state(posted_goals, posted_cards, posted_lineups, posted_halftimes, posted_ft, posted_matchdays)
+    save_state(posted_goals, posted_cards, posted_lineups,
+               posted_halftimes, posted_ft, posted_matchdays)
     msg = (
         f"⏸️ Half Time: {home} {hs}-{as_} {away}\n\n"
         f"Goals:\n{goals_summary}\n\n"
-        f"🏆 {league_name}\n\n"
+        f"{flag} {league_name}\n\n"
         f"Follow Goal Score ZFR for updates"
     )
     post_to_facebook(msg)
 
-# ── Full time ────────────────────────────────────────────────────
+# ── Full time ─────────────────────────────────────────────────────
 def handle_fulltime(match, league_name):
     match_id = match["id"]
     key = f"{match_id}_fulltime"
@@ -246,14 +284,16 @@ def handle_fulltime(match, league_name):
         return
 
     home, away, hs, as_ = get_score(match)
+    flag = LEAGUE_FLAGS.get(
+        next((c for c, n in LEAGUES.items() if n == league_name), ""), "🏆"
+    )
 
-    goals = match.get("goals", [])
     goal_lines = []
-    for g in goals:
-        scorer = g.get("scorer", {}).get("name", "Unknown")
-        assist = g.get("assist", {})
-        minute = g.get("minute", "?")
-        team   = g.get("team", {}).get("shortName", "")
+    for g in match.get("goals", []):
+        scorer     = g.get("scorer", {}).get("name", "Unknown")
+        assist     = g.get("assist", {})
+        minute     = g.get("minute", "?")
+        team       = g.get("team", {}).get("shortName", "")
         assist_str = f" (assist: {assist['name']})" if assist and assist.get("name") else ""
         goal_lines.append(f"  ⚽ {scorer}{assist_str} ({minute}') — {team}")
 
@@ -267,12 +307,13 @@ def handle_fulltime(match, league_name):
         result = "It's a draw!"
 
     posted_ft.add(key)
-    save_state(posted_goals, posted_cards, posted_lineups, posted_halftimes, posted_ft, posted_matchdays)
+    save_state(posted_goals, posted_cards, posted_lineups,
+               posted_halftimes, posted_ft, posted_matchdays)
     msg = (
         f"🏁 Full Time: {home} {hs}-{as_} {away}\n\n"
         f"{result}\n\n"
         f"Goals:\n{goals_summary}\n\n"
-        f"🏆 {league_name}\n\n"
+        f"{flag} {league_name}\n\n"
         f"Follow Goal Score ZFR for updates"
     )
     post_to_facebook(msg)
@@ -280,7 +321,7 @@ def handle_fulltime(match, league_name):
     # Generate and post reel after full time
     create_and_post_reel(match, league_name)
 
-# ── Main loop ────────────────────────────────────────────────────
+# ── Main loop ─────────────────────────────────────────────────────
 matchday_posted_today = None
 
 def check_matches():
@@ -289,24 +330,23 @@ def check_matches():
 
     all_matches_today = {}
     for code in LEAGUES:
-        data = football_get(f"/competitions/{code}/matches?dateFrom={today}&dateTo={today}")
+        data = football_get(
+            f"/competitions/{code}/matches?dateFrom={today}&dateTo={today}"
+        )
         if data:
             matches = data.get("matches", [])
             if matches:
                 all_matches_today[code] = matches
 
-    # Post matchday preview once per day if there are games
     if matchday_posted_today != today:
         handle_matchday_preview(all_matches_today)
         matchday_posted_today = today
 
-    # Process each match
     for code, matches in all_matches_today.items():
         league_name = LEAGUES[code]
         for match in matches:
             status = match.get("status")
 
-            # Lineups — 45 to 75 mins before kickoff
             if status in ("TIMED", "SCHEDULED"):
                 kickoff_str = match.get("utcDate", "")
                 if kickoff_str:
@@ -315,16 +355,13 @@ def check_matches():
                     if timedelta(minutes=45) <= kickoff - now <= timedelta(minutes=75):
                         handle_lineups(match, league_name)
 
-            # Live events
             if status == "IN_PLAY":
                 handle_goals(match, league_name)
                 handle_red_cards(match, league_name)
 
-            # Half time
             if status == "PAUSED":
                 handle_halftime(match, league_name)
 
-            # Full time
             if status == "FINISHED":
                 handle_fulltime(match, league_name)
 
